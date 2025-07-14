@@ -1,21 +1,57 @@
-from keep_alive import keep_alive
-import requests, time, pytz
-from datetime import datetime
-from shine_scraper import fetch_shine_jobs
-from indeed_scraper import fetch_indeed_jobs
-from telegram_utils import send_telegram_message, format_jobs
+import requests
+from bs4 import BeautifulSoup
+import time
 
-keep_alive()
+# === TELEGRAM SETTINGS ===
+BOT_TOKEN = "your_bot_token_here"
+CHAT_ID = "your_chat_id_here"
 
-def run_bot():
-    jobs = fetch_shine_jobs() + fetch_indeed_jobs()
-    now = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%d-%b %I:%M %p')
-    message = f"🕒 <b>Job Update @ {now}</b>\n\n" + format_jobs(jobs)
-    send_telegram_message(message)
+# === FILTER CRITERIA ===
+keywords = ["diploma mechanical engineer", "cad designer", "graphic designer"]
+locations = ["Tamil Nadu", "Bangalore", "Chennai", "Coimbatore", "Madurai", "Trichy", "Salem"]
 
-while True:
-    now = datetime.now(pytz.timezone('Asia/Kolkata')).strftime('%H:%M')
-    if now in ["09:00", "12:00", "16:00"]:
-        run_bot()
-        time.sleep(60)
-    time.sleep(30)
+def send_telegram_alert(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+    requests.post(url, data=data)
+
+def scrape_shine_jobs():
+    url = "https://www.shine.com/job-search/diploma-mechanical-engineer-jobs"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.content, 'html.parser')
+    jobs = []
+
+    for job_card in soup.select(".jobCard"):
+        try:
+            title = job_card.select_one(".job-title").get_text(strip=True)
+            company = job_card.select_one(".job-company").get_text(strip=True)
+            location = job_card.select_one(".job-location").get_text(strip=True)
+            exp = job_card.select_one(".job-experience").get_text(strip=True)
+            link = "https://www.shine.com" + job_card.a["href"]
+
+            if (
+                any(loc.lower() in location.lower() for loc in locations) and
+                "2" in exp and
+                any(k.lower() in title.lower() for k in keywords)
+            ):
+                job_text = f"<b>{title}</b>\n{company}\n{location} | Exp: {exp}\n🔗 {link}"
+                jobs.append(job_text)
+        except:
+            continue
+    return jobs
+
+def job_runner():
+    jobs = scrape_shine_jobs()
+    if jobs:
+        for job in jobs:
+            send_telegram_alert(job)
+    else:
+        send_telegram_alert("😢 No new jobs found at this time.")
+
+# Run every 6 hours
+if __name__ == "__main__":
+    while True:
+        print("🔍 Checking for jobs...")
+        job_runner()
+        time.sleep(6 * 60 * 60)  # 6 hours
